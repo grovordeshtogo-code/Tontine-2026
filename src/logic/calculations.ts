@@ -11,6 +11,8 @@ export interface MemberFinanceStatus {
     balance: number; // Negative = Debt
     daysLate: number;
     status: Member['status'];
+    unpaidContributions: number; // New: Specific amount for contributions/fees
+    unpaidPenalties: number;    // New: Specific amount for penalties
 }
 
 /**
@@ -26,14 +28,7 @@ export function calculateMemberStatus(
     const now = startOfDay(referenceDate);
 
     // Initial calculation: counts today as a full day
-    let daysSinceStart = differenceInCalendarDays(now, start) + 1;
-
-    // RULE 20H UTC: 
-    // The contribution for "today" is only technically due after 20:00 UTC.
-    // Before that time, we shouldn't count today as a late/due day.
-    if (referenceDate.getUTCHours() < 20) {
-        daysSinceStart = Math.max(0, daysSinceStart - 1);
-    }
+    const daysSinceStart = differenceInCalendarDays(now, start) + 1;
 
     // Si le groupe n'a pas commencé
     if (daysSinceStart <= 0) {
@@ -44,6 +39,8 @@ export function calculateMemberStatus(
             balance: 0,
             daysLate: 0,
             status: member.status,
+            unpaidContributions: 0,
+            unpaidPenalties: 0,
         };
     }
 
@@ -65,13 +62,24 @@ export function calculateMemberStatus(
         totalPaidPenalty += att.penalty_paid;
     });
 
-    // Jours payés (basé sur le montant contribution, le fee est accessoire pour le status 'retard')
+    // Jours payés (basé sur le montant contribution)
     const paidDays = Math.floor(totalPaidContribution / group.contribution_amount);
 
-    const daysLate = Math.max(0, daysSinceStart - paidDays);
+    // Retard brut (incluant aujourd'hui)
+    const rawDaysLate = Math.max(0, daysSinceStart - paidDays);
+
+    // Calcul des jours pénalisables (Exclure aujourd'hui si avant 20h)
+    let penaltyDays = rawDaysLate;
+
+    // Si on a un retard (donc aujourd'hui n'est pas payé ou des jours d'avant)
+    // Et qu'il est avant 20h, on ne compte pas de pénalité pour "aujourd'hui"
+    // On considère que le dernier jour de "retard" est en cours, donc pas encore pénalisable.
+    if (rawDaysLate > 0 && referenceDate.getUTCHours() < 20) {
+        penaltyDays = Math.max(0, rawDaysLate - 1);
+    }
 
     // Calcul pénalités
-    const currentPenaltyDue = daysLate * group.penalty_per_day;
+    const currentPenaltyDue = penaltyDays * group.penalty_per_day;
 
     // Total dû aujourd'hui pour être à jour
     // Balance = (Contributions Payées + Pénalités Payées + Frais Payés) - (Contributions Dues + Pénalités Dues + Frais Dus)
@@ -80,19 +88,25 @@ export function calculateMemberStatus(
     // Détermination du statut suggéré
     let newStatus: Member['status'] = 'ACTIVE';
 
-    if (daysLate >= 12) {
+    if (rawDaysLate >= 12) {
         newStatus = 'EXCLUDED';
-    } else if (daysLate >= 4) {
+    } else if (rawDaysLate >= 4) {
         newStatus = 'ALERT_8J';
     }
+
+    // Calculate detailed unpaid amounts
+    const unpaidContributions = Math.max(0, (totalContributionDue + totalFeeDue) - (totalPaidContribution + totalPaidFee));
+    const unpaidPenalties = Math.max(0, currentPenaltyDue - totalPaidPenalty);
 
     return {
         totalContributionDue,
         totalPenaltyDue: currentPenaltyDue,
         totalPaid: totalPaidContribution,
         balance, // Si négatif, c'est ce qu'il doit payer
-        daysLate,
+        daysLate: rawDaysLate,
         status: newStatus,
+        unpaidContributions,
+        unpaidPenalties
     };
 }
 
@@ -120,9 +134,10 @@ export function simulatePaymentDistribution(
     amount: number,
     group: Group,
     attendances: Attendance[],
+    initialWalletBalance: number = 0,
     referenceDate: Date = new Date()
 ): PaymentSimulation {
-    let remainingAmount = amount;
+    let remainingAmount = amount + initialWalletBalance;
     const steps: PaymentSimulation['steps'] = [];
     let breakdown = { contributions: 0, penalties: 0, fees: 0 };
 
@@ -227,4 +242,46 @@ export function simulatePaymentDistribution(
         steps,
         remainingAmount
     };
+}
+
+export interface DailyTotal {
+    date: string;
+    totalContributions: number;
+    totalPenalties: number;
+    totalFees: number;
+}
+
+export function calculateDailyTotals(attendances: Attendance[]): DailyTotal[] {
+    const totalsMap = new Map<string, DailyTotal>();
+
+    attendances.forEach(att => {
+        const dateStr = att.date.split('T')[0];
+
+        if (!totalsMap.has(dateStr)) {
+            totalsMap.set(dateStr, {
+                date: dateStr,
+                totalContributions: 0,
+                totalPenalties: 0,
+                totalFees: 0
+            });
+        }
+
+        const current = totalsMap.get(dateStr)!;
+
+        // Contributions
+        if (att.status === 'PAID' || att.status === 'LATE') {
+            current.totalContributions += att.amount_paid;
+        }
+
+        // Penalties
+        current.totalPenalties += att.penalty_paid;
+
+        // Fees
+        current.totalFees += (att.fee_paid || 0);
+    });
+
+    // Convert to array and sort by date descending (most recent first)
+    return Array.from(totalsMap.values()).sort((a, b) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
 }

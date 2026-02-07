@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Calendar, CheckCircle } from 'lucide-react';
+import { Calendar, CheckCircle, Download, FileText, FileSpreadsheet, FileType } from 'lucide-react';
+import { exportToPDF, exportToWord, exportToExcel } from '../utils/exportUtils';
 import clsx from 'clsx';
 import { format, parseISO, isPast, isToday } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -8,6 +9,7 @@ import { fr } from 'date-fns/locale';
 export const Payouts: React.FC = () => {
     const { pots, currentGroup, members, generatePayouts, validatePayout, isLoading } = useStore();
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
     if (isLoading) return <div className="p-8 text-center text-gray-400">Chargement...</div>;
     if (!currentGroup) return <div className="p-8 text-center text-gray-500">Aucun groupe actif.</div>;
@@ -24,6 +26,39 @@ export const Payouts: React.FC = () => {
         setIsGenerating(false);
     };
 
+    const handleExport = (type: 'pdf' | 'word' | 'excel') => {
+        setIsExportMenuOpen(false);
+        const title = `Calendrier des Gains - ${currentGroup?.name}`;
+
+        const headers = ["Ordre", "Date", "Membre", "Montant", "Statut"];
+
+        const data = pots.map((pot, index) => {
+            const member = members.find(m => m.id === pot.member_id);
+            const date = parseISO(pot.distribution_date);
+            const isDone = pot.status === 'COMPLETED';
+
+            return [
+                `#${index + 1}`,
+                format(date, "d MMMM yyyy", { locale: fr }),
+                member?.full_name || 'Inconnu',
+                (pot.amount || 0).toLocaleString('fr-FR') + ' F',
+                isDone ? "VERSÉ" : "EN ATTENTE"
+            ];
+        });
+
+        switch (type) {
+            case 'pdf':
+                exportToPDF(headers, data, title);
+                break;
+            case 'word':
+                exportToWord(headers, data, title);
+                break;
+            case 'excel':
+                exportToExcel(headers, data, title);
+                break;
+        }
+    };
+
     return (
         <div className="pb-20">
             <div className="bg-white sticky top-0 z-10 p-4 border-b border-gray-100 shadow-sm flex justify-between items-center">
@@ -32,15 +67,48 @@ export const Payouts: React.FC = () => {
                     <p className="text-xs text-gray-500">Prochain gain chaque {currentGroup.rotation_days} jours</p>
                 </div>
 
-                {pots.length === 0 && (
-                    <button
-                        onClick={handleGenerate}
-                        disabled={isGenerating}
-                        className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
-                    >
-                        {isGenerating ? 'Calcul...' : 'Générer Planning'}
-                    </button>
-                )}
+                <div className="flex gap-2">
+                    {pots.length > 0 && (
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                                className="p-2 bg-white text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-primary-600 transition-colors"
+                                title="Exporter le calendrier"
+                            >
+                                <Download size={20} />
+                            </button>
+
+                            {isExportMenuOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="py-1">
+                                        <button onClick={() => handleExport('pdf')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                            <FileType size={16} className="text-red-500" />
+                                            PDF
+                                        </button>
+                                        <button onClick={() => handleExport('word')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                            <FileText size={16} className="text-blue-600" />
+                                            Word
+                                        </button>
+                                        <button onClick={() => handleExport('excel')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                            <FileSpreadsheet size={16} className="text-green-600" />
+                                            Excel
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {pots.length === 0 && (
+                        <button
+                            onClick={handleGenerate}
+                            disabled={isGenerating}
+                            className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
+                        >
+                            {isGenerating ? 'Calcul...' : 'Générer Planning'}
+                        </button>
+                    )}
+                </div>
             </div>
 
             <div className="p-4 space-y-4">

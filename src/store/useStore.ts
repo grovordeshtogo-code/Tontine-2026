@@ -36,6 +36,7 @@ interface AppState {
     deleteMember: (memberId: string) => Promise<void>;
     updatePotDate: (potId: string, newDate: string) => Promise<void>;
     processBulkPayment: (memberId: string, amount: number) => Promise<void>;
+    reorderMembers: (updates: { id: string; position: number }[]) => Promise<void>;
 }
 
 // Mocks supprimés car connexion DB active
@@ -49,6 +50,7 @@ export const useStore = create<AppState>((set, get) => ({
     isLoading: false,
     memberSession: null,
     unlockedGroupIds: [],
+
 
     fetchData: async (_groupId: string) => {
         set({ isLoading: true });
@@ -115,7 +117,9 @@ export const useStore = create<AppState>((set, get) => ({
             const { data: members, error: memberError } = await supabase
                 .from('members')
                 .select('*')
-                .eq('group_id', groupData.id);
+                .eq('group_id', groupData.id)
+                .order('position', { ascending: true })
+                .order('full_name', { ascending: true }); // Fallback
             if (memberError) throw memberError;
 
             // 3. Récupérer les pointages
@@ -548,32 +552,32 @@ export const useStore = create<AppState>((set, get) => ({
     },
 
     processBulkPayment: async (memberId: string, amount: number) => {
-        const { currentGroup, attendances, markAttendance } = get();
+        const { currentGroup, attendances, members, markAttendance, updateMember } = get();
         if (!currentGroup || amount <= 0) return;
 
-        let remainingAmount = amount;
+        const member = members.find(m => m.id === memberId);
+        if (!member) return;
+
+        // 1. Initial Logic: Total Available = Input Amount + Wallet Balance
+        // We start by calculating the total funds available for this transaction.
+        let walletBalance = member.wallet_balance || 0;
+        let totalFunds = amount + walletBalance;
+        let remainingAmount = totalFunds;
+
+        // Note: Logic change. We consume wallet FIRST? Or simpler: We just have a pool of money.
+        // At the end, whatever is left goes to wallet.
+        // If we started with 500 (Wallet) + 500 (Input) = 1000. We pay 1000. Balance = 0.
+        // If we started with 0 (Wallet) + 700 (Input) = 700. We pay 500. Balance = 200.
 
         // --- 1. PREPARATION ---
         const groupStart = parseISO(currentGroup.start_date);
         const refDate = startOfDay(new Date()); // Aujourd'hui 00:00
 
         // Get paid history for quick lookup
-        // Key: "YYYY-MM-DD", Value: Attendance Object
         const attendanceMap = new Map<string, Attendance>();
         attendances.filter(a => a.member_id === memberId).forEach(a => {
             attendanceMap.set(a.date.split('T')[0], a);
         });
-
-        // Determine Start of Check (Group Start)
-        // We will iterate day by day from Group Start until money runs out OR we reach a reasonable future limit (e.g. 1 year)
-        // Note: In Tontine, you pay for EVERY meeting/day in the cycle. 
-        // Assuming daily frequency based on the loop in the original code, 
-        // BUT logic/calculations says "daysSinceStart * contribution". 
-        // So we assume it's a daily tontine for simplicity given the "penalty PER DAY" naming.
-
-        // If rotation_days > 1, does it mean contribution is every X days? 
-        // Validating with `calculations.ts`: `totalContributionDue = daysSinceStart * group.contribution_amount`
-        // This implies DAILY contribution regardless of rotation. Rotation usually for Payout.
 
         let currentIterDate = groupStart;
         let safetyCounter = 0;
@@ -581,16 +585,7 @@ export const useStore = create<AppState>((set, get) => ({
         // --- 2. PAYMENT LOOP ---
         while (remainingAmount > 0 && safetyCounter < 365 * 2) {
             const dateStr = currentIterDate.toISOString().split('T')[0];
-
-            // Existing record or empty
             const existingAtt = attendanceMap.get(dateStr);
-            // Note: If today (diff=0), it becomes late after 20H UTC. 
-            // For bulk payment simplicity, we consider today as "Due" but maybe not "Late" for penalty 
-            // unless we are stricter. 
-
-            // Check specific late rule from calculations.ts
-            // "If today < 20H, daysSinceStart - 1". 
-            // Means Today is NOT late yet.
             const isStrictlyLate = differenceInCalendarDays(refDate, currentIterDate) >= 1;
 
             // --- COST CALCULATION ---
@@ -599,7 +594,6 @@ export const useStore = create<AppState>((set, get) => ({
             let contributionCost = 0;
 
             // 1. PENALTY
-            // Applies if strictly late AND not fully paid
             if (isStrictlyLate) {
                 const alreadyPaidPenalty = existingAtt?.penalty_paid || 0;
                 const penaltyInfo = currentGroup.penalty_per_day || 0;
@@ -609,7 +603,6 @@ export const useStore = create<AppState>((set, get) => ({
             }
 
             // 2. FEE (Admin Fee)
-            // Applies always if defined
             const alreadyPaidFee = existingAtt?.fee_paid || 0;
             const feeInfo = currentGroup.admin_fee || 0;
             if (alreadyPaidFee < feeInfo) {
@@ -624,7 +617,6 @@ export const useStore = create<AppState>((set, get) => ({
             }
 
             // --- DEDUCTION LOGIC (Waterfall) ---
-
             let payPenalty = false;
             let payFee = false;
             let payContrib = false;
@@ -634,11 +626,7 @@ export const useStore = create<AppState>((set, get) => ({
                 remainingAmount -= penaltyCost;
                 payPenalty = true;
             } else if (penaltyCost > 0) {
-                // Not enough for penalty -> Stop or Partial? 
-                // Requirement: "n'arrive pas à prendre en compte..." implies we must pay it.
-                // Usually bulk payment stops if it can't pay a full item? 
-                // Let's strict stop to avoid partial nightmare.
-                break;
+                break; // Not enough
             }
 
             // Pay Fee Second
@@ -646,7 +634,7 @@ export const useStore = create<AppState>((set, get) => ({
                 remainingAmount -= feeCost;
                 payFee = true;
             } else if (feeCost > 0) {
-                break;
+                break; // Not enough
             }
 
             // Pay Contribution Third
@@ -654,36 +642,32 @@ export const useStore = create<AppState>((set, get) => ({
                 remainingAmount -= contributionCost;
                 payContrib = true;
             } else if (contributionCost > 0) {
-                break;
+                break; // Not enough
             }
 
-            // --- UPDATE STATE IF CHANGED ---
+            // --- UPDATE ATTENDANCE IF CHANGED ---
             if (payPenalty || payFee || payContrib) {
-                // Determine new status
                 const newStatus = (payContrib || (existingAtt?.status === 'PAID')) ? 'PAID' : (existingAtt?.status || 'PENDING');
-
-                // Determine cumulative paid amounts
-                const finalPenaltyPaid = (existingAtt?.penalty_paid || 0) + (payPenalty ? penaltyCost : 0); // Should be full amount
+                const finalPenaltyPaid = (existingAtt?.penalty_paid || 0) + (payPenalty ? penaltyCost : 0);
                 const finalFeePaid = (existingAtt?.fee_paid || 0) + (payFee ? feeCost : 0);
-
-                // IMPORTANT: We use markAttendance which expects booleans for "isPaid", 
-                // but here we are dealing with partial states or complex updates.
-                // markAttendance is simple wrapper. Let's call it smartly or direct update? 
-                // markAttendance sign: (id, date, status, penaltyPaid(bool), feePaid(bool))
-                // It sets value to MAX if true.
 
                 const isPenaltyFullyPaid = finalPenaltyPaid >= (currentGroup.penalty_per_day || 0);
                 const isFeeFullyPaid = finalFeePaid >= (currentGroup.admin_fee || 0);
 
-                // Note: processBulkPayment calls markAttendance sequentially. 
-                // This might be slow for many days. Optimistic update is handled in markAttendance.
-                // We await to ensure order.
                 await markAttendance(memberId, dateStr, newStatus, isPenaltyFullyPaid, isFeeFullyPaid);
             }
 
             // Move to next day
             currentIterDate.setDate(currentIterDate.getDate() + 1);
             safetyCounter++;
+        }
+
+        // --- 3. WALLET UPDATE ---
+        // New Wallet Balance = Remaining Amount
+        // Optimistic Update locally
+        if (remainingAmount !== walletBalance) {
+            await updateMember(memberId, { wallet_balance: remainingAmount });
+            console.log(`Paiement de ${amount} effectué. Solde initial: ${walletBalance}. Restant: ${remainingAmount} mis dans le portefeuille.`);
         }
     },
 
@@ -718,5 +702,41 @@ export const useStore = create<AppState>((set, get) => ({
 
     logoutMember: () => {
         set({ memberSession: null });
+    },
+
+    reorderMembers: async (updates) => {
+        // 1. Optimistic Update
+        set(state => {
+            const newMembers = [...state.members];
+            updates.forEach(u => {
+                const member = newMembers.find(m => m.id === u.id);
+                if (member) member.position = u.position;
+            });
+            // Re-sort by position
+            newMembers.sort((a, b) => (a.position || 0) - (b.position || 0));
+            return { members: newMembers };
+        });
+
+        // 2. Persist to DB
+        try {
+            // We reuse existing member data to ensure we have all required fields for upsert
+            // or we use update loop. Upsert is better for batching if we send full objects.
+            const { members } = get();
+            const payload = updates.map(u => {
+                const original = members.find(m => m.id === u.id);
+                if (!original) return null;
+                return { ...original, position: u.position };
+            }).filter(Boolean);
+
+            if (payload.length > 0) {
+                const { error } = await supabase.from('members').upsert(payload as any);
+                if (error) throw error;
+            }
+        } catch (error) {
+            console.error("Error reordering members:", error);
+            // Rollback by fetching fresh data
+            const groupId = get().currentGroup?.id;
+            if (groupId) get().fetchData(groupId);
+        }
     }
 }));

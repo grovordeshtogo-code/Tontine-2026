@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { calculateMemberStatus, simulatePaymentDistribution } from '../logic/calculations';
-import { Check, Search, Calendar as CalendarIcon, AlertTriangle, ShieldCheck, Banknote, X, Percent } from 'lucide-react';
+import { Check, Search, Calendar as CalendarIcon, AlertTriangle, ShieldCheck, Banknote, X, Percent, Download, FileText, FileSpreadsheet, FileType } from 'lucide-react';
+import { exportToPDF, exportToWord, exportToExcel } from '../utils/exportUtils';
 import clsx from 'clsx';
 import type { Attendance } from '../types';
 
@@ -16,6 +17,9 @@ export const DailyCheckin: React.FC = () => {
     const [bulkAmount, setBulkAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
 
+    // Export State
+    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+
     if (isLoading) return <div className="p-8 text-center text-gray-500">Chargement...</div>;
     if (!currentGroup) return <div className="p-8 text-center text-gray-500">Aucun groupe actif.</div>;
 
@@ -29,20 +33,26 @@ export const DailyCheckin: React.FC = () => {
         return attendances.find(a => a.member_id === memberId && a.date === selectedDate);
     };
 
-    const handleToggleAttendance = async (memberId: string, currentStatus: string | undefined, hasPenaltyPaid: boolean, hasFeePaid: boolean) => {
+    const handleToggleAttendance = async (memberId: string, currentStatus: string | undefined, hasPenaltyPaid: boolean) => {
         // Toggle PAID status
         const NEW_STATUS = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
-        await markAttendance(memberId, selectedDate, NEW_STATUS, hasPenaltyPaid, hasFeePaid);
+
+        // COUPLED LOGIC: If marking as PAID, we force Fee to be PAID too.
+        // If unmarking (PENDING), we force Fee to be UNPAID too.
+        // This ensures 500F + 50F are paid together.
+        const NEW_FEE_STATUS = NEW_STATUS === 'PAID';
+
+        await markAttendance(memberId, selectedDate, NEW_STATUS, hasPenaltyPaid, NEW_FEE_STATUS);
     };
 
     const handleTogglePenalty = async (memberId: string, currentStatus: string | undefined, hasPenaltyPaid: boolean, hasFeePaid: boolean) => {
-        const STATUS_TO_KEEP = currentStatus || 'PENDING';
-        await markAttendance(memberId, selectedDate, STATUS_TO_KEEP as any, !hasPenaltyPaid, hasFeePaid);
+        const STATUS_TO_KEEP = (currentStatus || 'PENDING') as Attendance['status'];
+        await markAttendance(memberId, selectedDate, STATUS_TO_KEEP, !hasPenaltyPaid, hasFeePaid);
     };
 
     const handleToggleFee = async (memberId: string, currentStatus: string | undefined, hasPenaltyPaid: boolean, hasFeePaid: boolean) => {
-        const STATUS_TO_KEEP = currentStatus || 'PENDING';
-        await markAttendance(memberId, selectedDate, STATUS_TO_KEEP as any, hasPenaltyPaid, !hasFeePaid);
+        const STATUS_TO_KEEP = (currentStatus || 'PENDING') as Attendance['status'];
+        await markAttendance(memberId, selectedDate, STATUS_TO_KEEP, hasPenaltyPaid, !hasFeePaid);
     };
 
     const openBulkModal = (memberId: string) => {
@@ -72,23 +82,92 @@ export const DailyCheckin: React.FC = () => {
             bulkMemberId,
             parseInt(bulkAmount) || 0,
             currentGroup,
-            attendances
+            attendances,
+            members.find(m => m.id === bulkMemberId)?.wallet_balance || 0
         )
         : null;
+
+    const handleExport = (type: 'pdf' | 'jpeg' | 'word' | 'excel') => {
+        setIsExportMenuOpen(false);
+        const title = `Pointage du ${new Date(selectedDate).toLocaleDateString('fr-FR')} - ${currentGroup?.name}`;
+
+        const headers = ["Nom du Membre", "Statut", "Cotisation (500F)", "Pénalité", "Frais (50F)"];
+
+        const data = filteredMembers.map(member => {
+            const att = getAttendance(member.id);
+            const isPresent = att?.status === 'PAID';
+            const isPenaltyPaid = att?.penalty_paid;
+            const isFeePaid = att?.fee_paid;
+
+            return [
+                member.full_name,
+                isPresent ? "PRÉSENT" : "ABSENT",
+                isPresent ? "PAYÉ" : "NON PAYÉ",
+                isPenaltyPaid ? "PAYÉ" : "-",
+                isFeePaid ? "PAYÉ" : "NON PAYÉ"
+            ];
+        });
+
+        switch (type) {
+            case 'pdf':
+                exportToPDF(headers, data, title);
+                break;
+            case 'word':
+                exportToWord(headers, data, title);
+                break;
+            case 'excel':
+                exportToExcel(headers, data, title);
+                break;
+            // JPEG not implemented for this view as it scrolls
+        }
+    };
 
     return (
         <div className='pb-20 relative'>
             <div className="bg-white sticky top-0 z-10 pt-4 px-4 pb-2 shadow-sm border-b border-gray-100">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-gray-900">Pointage</h2>
-                    <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
-                        <CalendarIcon size={16} className="text-gray-500" />
-                        <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer outline-none"
-                        />
+                    <div className="flex bg-gray-50 rounded-lg border border-gray-200 p-1">
+                        <div className="flex items-center gap-2 px-2">
+                            <CalendarIcon size={16} className="text-gray-500" />
+                            <input
+                                type="date"
+                                value={selectedDate}
+                                onChange={(e) => setSelectedDate(e.target.value)}
+                                className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer outline-none w-28"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="relative no-export ml-2">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsExportMenuOpen(!isExportMenuOpen);
+                            }}
+                            className="bg-white p-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-primary-600 transition-colors"
+                        >
+                            <Download size={20} />
+                        </button>
+
+                        {isExportMenuOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                <div className="py-1">
+                                    <button onClick={() => handleExport('pdf')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                        <FileType size={16} className="text-red-500" />
+                                        PDF
+                                    </button>
+                                    <button onClick={() => handleExport('word')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                        <FileText size={16} className="text-blue-600" />
+                                        Word
+                                    </button>
+                                    <button onClick={() => handleExport('excel')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                        <FileSpreadsheet size={16} className="text-green-600" />
+                                        Excel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -139,7 +218,33 @@ export const DailyCheckin: React.FC = () => {
                                                 {status.daysLate}j Retard
                                             </span>
                                         )}
+                                        {/* DETAILED DEBT BREAKDOWN */}
+                                        {status.balance < 0 && (
+                                            <div className="absolute top-10 left-16 bg-white border border-gray-200 shadow-xl rounded-lg p-3 z-50 text-xs w-64 hidden group-hover:block">
+                                                <div className="font-bold mb-1 border-b pb-1">Détails de la dette</div>
+                                                <div className="flex justify-between">
+                                                    <span>{status.daysLate}j Retard:</span>
+                                                    <span className="font-mono">{status.unpaidContributions.toLocaleString()} F</span>
+                                                </div>
+                                                <div className="flex justify-between text-red-500">
+                                                    <span>Pénalités:</span>
+                                                    <span className="font-mono">{status.unpaidPenalties.toLocaleString()} F</span>
+                                                </div>
+                                                <div className="flex justify-between font-bold border-t pt-1 mt-1">
+                                                    <span>Total:</span>
+                                                    <span className="font-mono">{Math.abs(status.balance).toLocaleString()} F</span>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
+                                    {/* Create a group container to handle hover state for detailed breakdown - BUT mobile? */}
+                                    {/* Mobile friendly approach: Display it inline if space permits or always visible if debt exists */}
+                                    {status.balance < 0 && (
+                                        <div className="text-[10px] text-gray-500 mt-0.5 flex flex-wrap gap-x-2">
+                                            <span>Retard: <b className="text-gray-700">{status.unpaidContributions.toLocaleString()} F</b></span>
+                                            <span>Pénalité: <b className="text-red-500">{status.unpaidPenalties.toLocaleString()} F</b></span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -185,7 +290,7 @@ export const DailyCheckin: React.FC = () => {
 
                                 {/* Contribution Toggle */}
                                 <button
-                                    onClick={() => handleToggleAttendance(member.id, attendanceToday?.status, isPenaltyPaid, isFeePaid)}
+                                    onClick={() => handleToggleAttendance(member.id, attendanceToday?.status, isPenaltyPaid)}
                                     className={clsx(
                                         "w-10 h-10 rounded-full flex items-center justify-center transition-all border",
                                         isPaid
@@ -256,14 +361,12 @@ export const DailyCheckin: React.FC = () => {
                                                     </ul>
 
                                                     {simulation.remainingAmount > 0 && (
-                                                        <div className="mt-2 pt-2 border-t border-amber-200">
-                                                            <p className="font-bold text-xs text-red-600 mb-1">
-                                                                Montant incorrect ! Reste: {simulation.remainingAmount} {currentGroup.currency}
+                                                        <div className="mt-2 pt-2 border-t border-blue-200">
+                                                            <p className="font-bold text-xs text-green-600 mb-1">
+                                                                Surplus: {simulation.remainingAmount} {currentGroup.currency}
                                                             </p>
-                                                            <p className="text-xs opacity-80">
-                                                                Le montant doit couvrir exactement les frais.
-                                                                <br />
-                                                                Montant exact pour {simulation.totalCovered} jours: <strong>{parseInt(bulkAmount) - simulation.remainingAmount}</strong>
+                                                            <p className="text-xs opacity-80 text-gray-600">
+                                                                Ce montant sera ajouté à votre portefeuille.
                                                             </p>
                                                         </div>
                                                     )}
@@ -295,7 +398,7 @@ export const DailyCheckin: React.FC = () => {
                                 </button>
                                 <button
                                     onClick={confirmBulkPayment}
-                                    disabled={!simulation || simulation.totalCovered <= 0 || simulation.remainingAmount > 0 || isProcessing}
+                                    disabled={!simulation || isProcessing}
                                     className="flex-1 py-3 px-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center"
                                 >
                                     {isProcessing ? (

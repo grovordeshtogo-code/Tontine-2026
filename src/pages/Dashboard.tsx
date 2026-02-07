@@ -5,6 +5,8 @@ import clsx from 'clsx';
 import { GroupLoginModal } from '../components/GroupLoginModal';
 import { Link } from 'react-router-dom';
 
+
+
 export const Dashboard: React.FC = () => {
     const { currentGroup, groups, members, attendances, isLoading, fetchData } = useStore();
 
@@ -185,6 +187,27 @@ export const Dashboard: React.FC = () => {
                     // Refresh explicitly to perform the switch (fetchData is called by unlockGroup, but we want to confirm)
                 }}
             />
+
+            {/* Daily Totals Link Card */}
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex justify-between items-center group cursor-pointer hover:border-primary-200 transition-all">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-primary-50 text-primary-600 rounded-lg group-hover:bg-primary-100 transition-colors">
+                        <TrendingUp size={24} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-gray-900">Récapitulatif Journalier</h3>
+                        <p className="text-sm text-gray-500">Voir l'historique des cotisations et pénalités</p>
+                    </div>
+                </div>
+                <Link
+                    to="/daily-summary"
+                    className="flex items-center gap-2 text-primary-600 font-semibold bg-primary-50 px-4 py-2 rounded-lg hover:bg-primary-100 transition-colors"
+                >
+                    Voir détails
+                    <TrendingUp size={16} />
+                </Link>
+            </div>
         </div>
     );
 };
+

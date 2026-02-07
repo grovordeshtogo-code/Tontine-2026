@@ -22,6 +22,8 @@ export interface Member {
   join_date: string;
   pin_code?: string; // Code secret pour connexion membre
   status: MemberStatus;
+  position?: number; // Ordre d'affichage
+  wallet_balance?: number;
 }
 
 export interface Attendance {

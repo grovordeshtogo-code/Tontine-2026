@@ -1,17 +1,28 @@
--- Script de peuplement REEL (Depuis CSV)
--- 1. Crée le groupe "Tontine Principale 2026"
--- 2. Insère les 100 membres exacts du fichier CSV
+-- ==========================================
+-- SCRIPT DE RÉINITIALISATION MANUELLE
+-- ==========================================
 
+-- 1. Ajout de la colonne 'position' (Migration)
+ALTER TABLE members ADD COLUMN IF NOT EXISTS "position" INTEGER DEFAULT 0;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS "wallet_balance" INTEGER DEFAULT 0;
+
+-- 2. Nettoyage des données existantes (ATTENTION : SUPPRIME TOUT)
+TRUNCATE TABLE public.attendance CASCADE;
+TRUNCATE TABLE public.pots CASCADE;
+TRUNCATE TABLE public.members CASCADE;
+TRUNCATE TABLE public.groups CASCADE;
+
+-- 3. Ré-insertion des données (Seed)
 DO $$
 DECLARE
   new_group_id uuid;
 BEGIN
-  -- 1. Création du Groupe
+  -- Création du Groupe
   INSERT INTO public.groups (name, contribution_amount, admin_fee, pot_amount, rotation_days, penalty_per_day, start_date)
   VALUES ('Grovordesh Tontine - Attigangomé', 500, 50, 200000, 4, 200, '2026-02-01')
   RETURNING id INTO new_group_id;
 
-  -- 2. Insertion des Membres du CSV
+  -- Insertion des 100 Membres avec Positions
   INSERT INTO public.members (group_id, full_name, phone, status, join_date, pin_code, position)
   VALUES 
     (new_group_id, 'ADZA Koffi A', '+228 90516766', 'ACTIVE', '2026-02-01', '1234', 1),

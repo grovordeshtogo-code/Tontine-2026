@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { AdminHome } from './pages/AdminHome';
 import { DailyCheckin } from './pages/DailyCheckin';
+import { DailySummary } from './pages/DailySummary';
 import { Members } from './pages/Members';
 import { Payouts } from './pages/Payouts';
 import { Login } from './pages/Login';
@@ -39,6 +40,7 @@ function App() {
           <Route index element={<AdminHome />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="checkin" element={<DailyCheckin />} />
+          <Route path="daily-summary" element={<DailySummary />} />
           <Route path="members" element={<Members />} />
           <Route path="payouts" element={<Payouts />} />
         </Route>

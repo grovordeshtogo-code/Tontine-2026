@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 // Force UI Update
 import { useStore } from '../store/useStore';
-import { Search, Phone, MessageSquare, Layers, Pencil, Trash2, Undo, Archive, UserX } from 'lucide-react';
+import { Search, Phone, Trash2, Archive, Undo, Download, FileText, FileSpreadsheet, FileType, ArrowUpDown, ChevronUp, ChevronDown, UserX, Layers, Pencil, MessageSquare } from 'lucide-react';
+import { exportToPDF, exportToWord, exportToExcel } from '../utils/exportUtils';
 import { calculateMemberStatus } from '../logic/calculations';
 import clsx from 'clsx';
 import { MemberModal } from '../components/MemberModal';
@@ -11,6 +12,7 @@ export const Members: React.FC = () => {
     const { members, currentGroup, groups, attendances, updateMember, deleteMember, addMember, isLoading } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [showArchived, setShowArchived] = useState(false);
+    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
     if (isLoading) return <div className="p-8 text-center text-gray-500">Chargement...</div>;
     if (!currentGroup) return <div className="p-8 text-center text-gray-500">Aucun groupe actif. Veuillez en sélectionner un depuis l'accueil.</div>;
@@ -107,6 +109,73 @@ export const Members: React.FC = () => {
         }
     };
 
+    const handleExport = (type: 'pdf' | 'word' | 'excel') => {
+        setIsExportMenuOpen(false);
+        const title = `Liste des Membres - ${currentGroup?.name}`;
+
+        const headers = ["Nom", "Téléphone", "Groupe", "Statut", "Retard (Jours)", "Solde"];
+
+        const data = filteredMembers.map(member => {
+            const memberGroup = groups.find(g => g.id === member.group_id);
+            const memberStatus = memberGroup ? calculateMemberStatus(member, memberGroup, attendances.filter(a => a.member_id === member.id)) : null;
+
+            return [
+                member.full_name,
+                member.phone,
+                getGroupName(member.group_id),
+                member.status,
+                memberStatus?.daysLate || 0,
+                (memberStatus?.balance || 0).toLocaleString('fr-FR') + ' F'
+            ];
+        });
+
+        switch (type) {
+            case 'pdf':
+                exportToPDF(headers, data, title);
+                break;
+            case 'word':
+                exportToWord(headers, data, title);
+                break;
+            case 'excel':
+                exportToExcel(headers, data, title);
+                break;
+        }
+    };
+
+    const [reorderMode, setReorderMode] = useState(false);
+    const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+    const { reorderMembers } = useStore();
+
+    const handleMove = (index: number, direction: 'up' | 'down') => {
+        if (!currentGroup) return;
+        const newMembers = [...filteredMembers]; // Working with filtered list might be tricky if filter is active
+        // Better to disable reorder if filter is active
+
+        if (direction === 'up' && index > 0) {
+            [newMembers[index], newMembers[index - 1]] = [newMembers[index - 1], newMembers[index]];
+        } else if (direction === 'down' && index < newMembers.length - 1) {
+            [newMembers[index], newMembers[index + 1]] = [newMembers[index + 1], newMembers[index]];
+        }
+
+        // Optimistic update locally? 
+        // Actually we need to call store action which handles optimistic update
+        // We need to map back to the full list positions.
+        // Simplified: Swap positions values
+
+        const itemA = filteredMembers[index];
+        const itemB = direction === 'up' ? filteredMembers[index - 1] : filteredMembers[index + 1];
+
+        if (!itemA || !itemB) return;
+
+        const posA = itemA.position || 0;
+        const posB = itemB.position || 0;
+
+        reorderMembers([
+            { id: itemA.id, position: posB },
+            { id: itemB.id, position: posA }
+        ]);
+    };
+
     return (
         <div className="pb-20">
             <div className="bg-white sticky top-0 z-10 p-4 border-b border-gray-100 shadow-sm space-y-3">
@@ -116,6 +185,21 @@ export const Members: React.FC = () => {
                     </h2>
 
                     <div className="flex gap-2">
+                        {!showArchived && !searchTerm && (
+                            <button
+                                onClick={() => setReorderMode(!reorderMode)}
+                                className={clsx(
+                                    "p-2 rounded-lg transition-colors border",
+                                    reorderMode
+                                        ? "bg-primary-100 text-primary-700 border-primary-200"
+                                        : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                                )}
+                                title="Réorganiser"
+                            >
+                                <ArrowUpDown size={20} />
+                            </button>
+                        )}
+
                         <button
                             onClick={() => setShowArchived(!showArchived)}
                             className={clsx(
@@ -129,7 +213,7 @@ export const Members: React.FC = () => {
                             {showArchived ? <Undo size={20} /> : <Trash2 size={20} />}
                         </button>
 
-                        {!showArchived && (
+                        {!showArchived && !reorderMode && (
                             <button
                                 onClick={handleOpenAdd}
                                 className="bg-primary-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm hover:bg-primary-700 transition-colors"
@@ -137,6 +221,35 @@ export const Members: React.FC = () => {
                                 + Ajouter
                             </button>
                         )}
+
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                                className="p-2 bg-white text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-primary-600 transition-colors"
+                                title="Exporter la liste"
+                            >
+                                <Download size={20} />
+                            </button>
+
+                            {isExportMenuOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="py-1">
+                                        <button onClick={() => handleExport('pdf')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                            <FileType size={16} className="text-red-500" />
+                                            PDF
+                                        </button>
+                                        <button onClick={() => handleExport('word')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                            <FileText size={16} className="text-blue-600" />
+                                            Word
+                                        </button>
+                                        <button onClick={() => handleExport('excel')} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                            <FileSpreadsheet size={16} className="text-green-600" />
+                                            Excel
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -152,26 +265,43 @@ export const Members: React.FC = () => {
                 </div>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 pb-24">
                 {filteredMembers.length === 0 ? (
                     <div className="text-center py-10 text-gray-400 flex flex-col items-center gap-2">
                         {showArchived ? <Archive size={48} className="opacity-20" /> : <UserX size={48} className="opacity-20" />}
                         <p>Aucun membre trouvé {showArchived ? 'dans la corbeille' : ''}</p>
                     </div>
                 ) : (
-                    filteredMembers.map(member => {
-                        const memberGroup = groups.find(g => g.id === member.group_id);
-                        const memberStatus = memberGroup ? calculateMemberStatus(member, memberGroup, attendances.filter(a => a.member_id === member.id)) : null;
+                    filteredMembers.map((member, index) => {
+                        const memberStatus = currentGroup ? calculateMemberStatus(member, currentGroup, attendances.filter(a => a.member_id === member.id)) : null;
+                        const isSelected = reorderMode && selectedMemberId === member.id;
+
+                        // Calculate visual rank (index + 1)
+                        const rank = index + 1;
 
                         return (
-                            <div key={member.id} className={clsx(
-                                "rounded-xl p-4 shadow-sm border flex items-center justify-between transition-colors",
-                                showArchived ? "bg-gray-50 border-gray-200 opacity-75" : "bg-white border-gray-100"
-                            )}>
+                            <div
+                                key={member.id}
+                                onClick={() => {
+                                    if (reorderMode) setSelectedMemberId(member.id);
+                                }}
+                                className={clsx(
+                                    "rounded-xl p-4 shadow-sm border flex items-center justify-between transition-all duration-200",
+                                    showArchived ? "bg-gray-50 border-gray-200 opacity-75" : "bg-white border-gray-100",
+                                    reorderMode && "cursor-pointer hover:border-primary-300",
+                                    isSelected && "ring-2 ring-primary-500 bg-primary-50 transform scale-[1.01]"
+                                )}>
                                 <div className="flex items-center gap-3">
+                                    {/* Position Badge (only in Reorder Mode) */}
+                                    {reorderMode && (
+                                        <div className="text-gray-400 font-mono text-sm font-bold w-6">
+                                            #{rank}
+                                        </div>
+                                    )}
+
                                     {/* Avatar */}
                                     <div className={clsx(
-                                        "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg border-2",
+                                        "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg border-2 transition-colors",
                                         member.status === 'ACTIVE' ? "bg-primary-50 text-primary-600 border-primary-100" :
                                             member.status === 'ALERT_8J' ? "bg-orange-50 text-orange-600 border-orange-100" :
                                                 "bg-gray-100 text-gray-400 border-gray-200"
@@ -195,6 +325,11 @@ export const Members: React.FC = () => {
                                                 <Layers size={14} />
                                                 <span>{getGroupName(member.group_id)}</span>
                                             </div>
+                                            {member.wallet_balance && member.wallet_balance > 0 ? (
+                                                <div className="flex items-center gap-1.5 text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full w-fit mt-0.5">
+                                                    <span>Portefeuille: {member.wallet_balance.toLocaleString()}F</span>
+                                                </div>
+                                            ) : null}
                                         </div>
 
                                         {!showArchived && memberStatus && memberStatus.daysLate > 0 && (
@@ -207,47 +342,75 @@ export const Members: React.FC = () => {
 
                                 <div className="flex flex-col gap-2">
                                     {/* Action Buttons */}
-                                    {showArchived ? (
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleRestoreMember(member)}
-                                                className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100"
-                                                title="Restaurer"
-                                            >
-                                                <Undo size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleHardDelete(member)}
-                                                className="p-2 bg-red-50 text-red-600 rounded-full hover:bg-red-100"
-                                                title="Supprimer définitivement"
-                                            >
-                                                <UserX size={18} />
-                                            </button>
-                                        </div>
+                                    {reorderMode ? (
+                                        isSelected ? (
+                                            <div className="flex items-center gap-2 bg-white p-1 rounded-lg shadow-sm border border-gray-200" onClick={(e) => e.stopPropagation()}>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleMove(index, 'up'); }}
+                                                    disabled={index === 0}
+                                                    className="p-2 hover:bg-gray-100 text-gray-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                                    title="Monter"
+                                                >
+                                                    <ChevronUp size={20} />
+                                                </button>
+                                                <div className="w-px h-6 bg-gray-200"></div>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleMove(index, 'down'); }}
+                                                    disabled={index === filteredMembers.length - 1}
+                                                    className="p-2 hover:bg-gray-100 text-gray-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                                    title="Descendre"
+                                                >
+                                                    <ChevronDown size={20} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="text-gray-300">
+                                                <ArrowUpDown size={20} />
+                                            </div>
+                                        )
                                     ) : (
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleOpenEdit(member)}
-                                                className="p-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100"
-                                                title="Modifier"
-                                            >
-                                                <Pencil size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleWhatsApp(member)}
-                                                className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors"
-                                                title="WhatsApp"
-                                            >
-                                                <MessageSquare size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleArchiveMember(member)}
-                                                className="p-2 bg-gray-50 text-gray-400 rounded-full hover:bg-red-50 hover:text-red-500 transition-colors"
-                                                title="Mettre à la corbeille"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </div>
+                                        showArchived ? (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => handleRestoreMember(member)}
+                                                    className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100"
+                                                    title="Restaurer"
+                                                >
+                                                    <Undo size={18} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleHardDelete(member)}
+                                                    className="p-2 bg-red-50 text-red-600 rounded-full hover:bg-red-100"
+                                                    title="Supprimer définitivement"
+                                                >
+                                                    <UserX size={18} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => handleOpenEdit(member)}
+                                                    className="p-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100"
+                                                    title="Modifier"
+                                                >
+                                                    <Pencil size={18} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleWhatsApp(member)}
+                                                    className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors"
+                                                    title="WhatsApp"
+                                                >
+                                                    <MessageSquare size={18} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleArchiveMember(member)}
+                                                    className="p-2 bg-gray-50 text-gray-400 rounded-full hover:bg-red-50 hover:text-red-500 transition-colors"
+                                                    title="Mettre à la corbeille"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </div>
+                                        )
                                     )}
                                 </div>
                             </div>
@@ -256,12 +419,26 @@ export const Members: React.FC = () => {
                 )}
             </div>
 
+            {/* Fixed Floating Action Bar for Reorder Mode */}
+            {reorderMode && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl z-50 flex items-center gap-4 animate-in slide-in-from-bottom-4">
+                    <span className="font-medium text-sm">Mode réorganisation actif</span>
+                    <button
+                        onClick={() => { setReorderMode(false); setSelectedMemberId(null); }}
+                        className="bg-white text-gray-900 px-3 py-1 rounded-full text-xs font-bold hover:bg-gray-100 transition-colors"
+                    >
+                        Terminé
+                    </button>
+                </div>
+            )}
+
+
             <MemberModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 onSave={handleSaveMember}
                 initialData={editingMember}
             />
-        </div>
+        </div >
     );
 };
