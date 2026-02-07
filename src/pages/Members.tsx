@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 // Force UI Update
 import { useStore } from '../store/useStore';
-import { Search, Phone, AlertCircle, MessageSquare, Layers, Pencil, Trash2, Undo, Archive, UserX } from 'lucide-react';
+import { Search, Phone, MessageSquare, Layers, Pencil, Trash2, Undo, Archive, UserX } from 'lucide-react';
 import { calculateMemberStatus } from '../logic/calculations';
 import clsx from 'clsx';
 import { MemberModal } from '../components/MemberModal';

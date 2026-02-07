@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { differenceInCalendarDays, parseISO, startOfDay } from 'date-fns';
 import type { Group, Member, Attendance, PotDistribution } from '../types';
 import { supabase } from '../lib/supabaseClient';
-import { simulatePaymentDistribution } from '../logic/calculations';
+
 
 interface AppState {
     currentGroup: Group | null;
@@ -35,7 +35,7 @@ interface AppState {
     updateMember: (memberId: string, updates: Partial<Member>) => Promise<void>;
     deleteMember: (memberId: string) => Promise<void>;
     updatePotDate: (potId: string, newDate: string) => Promise<void>;
-    processBulkPayment: (memberId: string, amount: number, fromDate: string) => Promise<void>;
+    processBulkPayment: (memberId: string, amount: number) => Promise<void>;
 }
 
 // Mocks supprimés car connexion DB active
@@ -547,7 +547,7 @@ export const useStore = create<AppState>((set, get) => ({
         }
     },
 
-    processBulkPayment: async (memberId: string, amount: number, fromDate: string) => {
+    processBulkPayment: async (memberId: string, amount: number) => {
         const { currentGroup, attendances, markAttendance } = get();
         if (!currentGroup || amount <= 0) return;
 
@@ -584,7 +584,6 @@ export const useStore = create<AppState>((set, get) => ({
 
             // Existing record or empty
             const existingAtt = attendanceMap.get(dateStr);
-            const isLate = differenceInCalendarDays(refDate, currentIterDate) > 0;
             // Note: If today (diff=0), it becomes late after 20H UTC. 
             // For bulk payment simplicity, we consider today as "Due" but maybe not "Late" for penalty 
             // unless we are stricter. 

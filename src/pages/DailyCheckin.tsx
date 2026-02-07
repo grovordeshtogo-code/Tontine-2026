@@ -57,7 +57,7 @@ export const DailyCheckin: React.FC = () => {
         if (isNaN(amount) || amount <= 0) return;
 
         setIsProcessing(true);
-        await processBulkPayment(bulkMemberId, amount, selectedDate);
+        await processBulkPayment(bulkMemberId, amount);
         setIsProcessing(false);
         setShowBulkModal(false);
         setBulkMemberId(null);
