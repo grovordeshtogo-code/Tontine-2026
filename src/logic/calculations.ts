@@ -159,8 +159,9 @@ export function simulatePaymentDistribution(
         const existingAtt = attendanceMap.get(dateStr);
 
         // Strict Late Rule: Late if strictly past today (refDate > iterDate)
-        // Adjust based on business rules if needed
-        const isStrictlyLate = differenceInCalendarDays(refDate, currentIterDate) >= 1;
+        // OR if it is TODAY (refDate same day as iterDate) AND it is after 20h
+        const isStrictlyLate = differenceInCalendarDays(refDate, currentIterDate) >= 1 ||
+            (differenceInCalendarDays(refDate, currentIterDate) === 0 && referenceDate.getHours() >= 20);
 
         let penaltyCost = 0;
         let feeCost = 0;
