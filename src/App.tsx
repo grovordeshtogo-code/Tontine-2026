@@ -11,6 +11,7 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { MemberLogin } from './pages/MemberLogin';
 import { MemberDashboard } from './pages/MemberDashboard';
+import { MemberTransactionHistory } from './pages/MemberTransactionHistory';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { useStore } from './store/useStore';
 
@@ -31,6 +32,7 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/member-login" element={<MemberLogin />} />
         <Route path="/member-dashboard" element={<MemberDashboard />} />
+        <Route path="/member-history" element={<MemberTransactionHistory />} />
 
         <Route path="/" element={
           <ProtectedRoute>

@@ -687,7 +687,21 @@ export const useStore = create<AppState>((set, get) => ({
             if (error) throw error;
 
             if (data) {
-                set({ memberSession: data as Member, isLoading: false });
+                const member = data as Member;
+                set({ memberSession: member, isLoading: false });
+
+                // Load group data for this member
+                // This will populate attendances, pots, and members arrays
+                if (member.group_id) {
+                    // Auto-unlock the group for the member (they're authenticated)
+                    set(state => ({
+                        unlockedGroupIds: [...state.unlockedGroupIds, member.group_id]
+                    }));
+
+                    // Fetch all group data
+                    await get().fetchData(member.group_id);
+                }
+
                 return true;
             } else {
                 set({ isLoading: false });
