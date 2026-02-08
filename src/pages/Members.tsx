@@ -325,11 +325,16 @@ export const Members: React.FC = () => {
                                                 <Layers size={14} />
                                                 <span>{getGroupName(member.group_id)}</span>
                                             </div>
-                                            {member.wallet_balance && member.wallet_balance > 0 ? (
-                                                <div className="flex items-center gap-1.5 text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full w-fit mt-0.5">
-                                                    <span>Portefeuille: {member.wallet_balance.toLocaleString()}F</span>
-                                                </div>
-                                            ) : null}
+                                            {(() => {
+                                                const rawDebt = memberStatus ? Math.min(0, memberStatus.balance) : 0;
+                                                const effectiveWallet = Math.max(0, (member.wallet_balance || 0) + rawDebt);
+
+                                                return effectiveWallet > 0 ? (
+                                                    <div className="flex items-center gap-1.5 text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full w-fit mt-0.5">
+                                                        <span>Portefeuille: {effectiveWallet.toLocaleString()}F</span>
+                                                    </div>
+                                                ) : null;
+                                            })()}
                                         </div>
 
                                         {!showArchived && memberStatus && memberStatus.daysLate > 0 && (

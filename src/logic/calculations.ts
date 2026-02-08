@@ -28,7 +28,13 @@ export function calculateMemberStatus(
     const now = startOfDay(referenceDate);
 
     // Initial calculation: counts today as a full day
-    const daysSinceStart = differenceInCalendarDays(now, start) + 1;
+    let daysSinceStart = differenceInCalendarDays(now, start) + 1;
+
+    // RÈGLE DES 20H : Avant 20h, le jour en cours ne compte pas encore
+    // Cela s'applique à la fois aux cotisations ET aux pénalités
+    if (referenceDate.getHours() < 20) {
+        daysSinceStart = Math.max(1, daysSinceStart - 1);
+    }
 
     // Si le groupe n'a pas commencé
     if (daysSinceStart <= 0) {
@@ -65,18 +71,13 @@ export function calculateMemberStatus(
     // Jours payés (basé sur le montant contribution)
     const paidDays = Math.floor(totalPaidContribution / group.contribution_amount);
 
-    // Retard brut (incluant aujourd'hui)
+    // Retard brut (incluant aujourd'hui si après 20h, sinon exclu)
     const rawDaysLate = Math.max(0, daysSinceStart - paidDays);
 
-    // Calcul des jours pénalisables (Exclure aujourd'hui si avant 20h)
-    let penaltyDays = rawDaysLate;
-
-    // Si on a un retard (donc aujourd'hui n'est pas payé ou des jours d'avant)
-    // Et qu'il est avant 20h, on ne compte pas de pénalité pour "aujourd'hui"
-    // On considère que le dernier jour de "retard" est en cours, donc pas encore pénalisable.
-    if (rawDaysLate > 0 && referenceDate.getUTCHours() < 20) {
-        penaltyDays = Math.max(0, rawDaysLate - 1);
-    }
+    // Calcul des jours pénalisables
+    // Puisque daysSinceStart est déjà ajusté selon la règle des 20h,
+    // on utilise directement rawDaysLate pour les pénalités
+    const penaltyDays = rawDaysLate;
 
     // Calcul pénalités
     const currentPenaltyDue = penaltyDays * group.penalty_per_day;
